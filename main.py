@@ -1,6 +1,8 @@
 import random
 from termcolor import colored
 import argparse
+import re
+import mana
 
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument("-l", "--library", help='The library path', required=True)
@@ -24,7 +26,13 @@ landCount = 0
 def parseList(list):
   with open(list, "r") as ins:
     array = []
+    pattern = re.compile("^([A-Za-z ]+)x([0-9]+)$")
     for line in ins:
+      if pattern.match(line.strip()):
+        match = re.search(pattern, line)
+        for i in range(0, int(match.group(2))):
+          array.append(match.group(1).strip())
+      else:
         array.append(line.strip())
     return array
 
@@ -70,6 +78,11 @@ def drawHand():
   battlefield = []
   tapped = []
   library=parseList(args.library)
+
+  if len(library) < 60:
+    print "Library too small", len(library), library
+    return null
+
   shuffle(library)
   hand = []
   handSize = 7
@@ -80,14 +93,14 @@ def drawHand():
       draw(library, hand)
     if handSize == 5:
       isDrawing = False
-    if "engine" in hand and manaInHand() > 0 and "cheerio" in hand:
+    if "engine" in hand and mana.inHand(hand) > 0 and "cheerio" in hand:
       isDrawing = False
     handSize -= 1
   return hand
 
 # The mechanics of playing a card
 def play(card, hand):
-  if args.debug: print "Playing", card, " | Mana Available", manaAvailable(), " | Storm Count", stormCount
+  if args.debug: print "Playing", card, " | Mana Available", mana.available(battlefield, hand), " | Storm Count", stormCount
   global stormCount
 
   hand.remove(card)
@@ -109,23 +122,23 @@ def play(card, hand):
     drawCard = draw(library, hand)
     if args.debug: print "..drew ", drawCard
   if card == "engine":
-    manaTap(2)
+    mana.tap(2, battlefield, tapped, hand)
   if card == "serum":
     drawCard = draw(library, hand)
     battlefield.remove(card)
-    manaTap(1)
+    mana.tap(1, battlefield, tapped, hand)
     scry(2)
 
   if card == "retract":
     hand = bounceAll("cheerio", hand)
     hand = bounceAll("mox opal", hand)
     battlefield.remove(card)
-    manaTap(1)
+    mana.tap(1, battlefield, tapped, hand)
   if card == "recall":
     hand = bounceAll("cheerio", hand)
     hand = bounceAll("mox opal", hand)
     battlefield.remove(card)
-    manaTap(2)
+    mana.tap(2, battlefield, tapped, hand)
   if card == "cheerio":
     draws = []
     for i in range(0, battlefield.count("engine")):
@@ -138,10 +151,10 @@ def scry(scryNum):
   for i in range(0, scryNum - 1):
     scryCard = library[i]
     if args.debug: print "..scrying", scryCard
-    if scryCard in ["land", "fetchland", "mox opal"] and manaAvailable() + manaInHand() >= 1:
+    if scryCard in ["land", "fetchland", "mox opal"] and mana.available(battlefield, hand) + mana.inHand(hand) >= 1:
       library.remove(scryCard)
       library.append(scryCard)
-    if scryCard not in ["land", "fetchland", "mox opal"] and manaAvailable() + manaInHand() < 2:
+    if scryCard not in ["land", "fetchland", "mox opal"] and mana.available(battlefield, hand) + mana.inHand(hand) < 2:
       library.remove(scryCard)
       library.append(scryCard)
     if scryCard == "erayo":
@@ -170,42 +183,6 @@ def game():
 
   return turnNum
 
-# Returns your mana available
-def manaAvailable():
-  global battlefield
-  manaModifier = 0
-  if "mox opal" in battlefield and battlefield.count("cheerio") >= 2:
-    manaModifier += 1
-
-  if "simian" in hand:
-    manaModifier += 1
-
-  return battlefield.count("land") + manaModifier
-
-# Returns your mana available
-def manaInHand():
-  return hand.count("land") + hand.count("mox opal") + hand.count("simian")
-
-# Untaps your mana
-def manaUntap():
-  global tapped
-  for card in tapped:
-    battlefield.append(card)
-  tapped = []
-
-# Taps your mana
-def manaTap(count):
-  for i in range(0, count):
-    if "land" in battlefield:
-      battlefield.remove("land")
-      tapped.append("land")
-    elif "mox opal" in battlefield and battlefield.count("cheerio") >= 2:
-      battlefield.remove("mox opal")
-      tapped.append("mox opal")
-    elif "simian" in hand:
-      if args.debug: print "discarding simian"
-      hand.remove("simian")
-
 # Handles your turn logic
 def turn(turnNum, hand):
   if args.debug:
@@ -213,7 +190,7 @@ def turn(turnNum, hand):
     print colored(hand, 'green')
 
   # Upkeep: Untap
-  manaUntap()
+  mana.untap(tapped, battlefield)
 
   # Upkeep: draw
   if turnNum > 1:
@@ -222,6 +199,9 @@ def turn(turnNum, hand):
 
   # Mainphase
   turnMainPhase(turnNum, hand)
+
+def isCheerio(card):
+  return card is "cheerio" or card is "paradise mantle"
 
 # Main phase of your turn
 def turnMainPhase(turnNum, hand):
@@ -237,11 +217,11 @@ def turnMainPhase(turnNum, hand):
     play("mox opal", hand)
     turnMainPhase(turnNum, hand)
 
-  elif "engine" in hand and battlefield.count("engine") < 4 and manaAvailable() >= 2:
+  elif "engine" in hand and battlefield.count("engine") < 4 and mana.available(battlefield, hand) >= 2:
     play("engine", hand)
     turnMainPhase(turnNum, hand)
 
-  elif "serum" in hand and manaAvailable() >= 1 and len(library) > 2:
+  elif "serum" in hand and mana.available(battlefield, hand) >= 1 and len(library) > 2:
     play("serum", hand)
     turnMainPhase(turnNum, hand)
 
@@ -253,17 +233,17 @@ def turnMainPhase(turnNum, hand):
     play("cheerio", hand)
     turnMainPhase(turnNum, hand)
 
-  elif "mox opal" in battlefield and battlefield.count("cheerio") < 2 and hand.count("cheerio") >= 2 and "engine" in hand and manaAvailable() < 2:
+  elif "mox opal" in battlefield and battlefield.count("cheerio") < 2 and hand.count("cheerio") >= 2 and "engine" in hand and mana.available(battlefield, hand) < 2:
     if args.debug: print ".. attempting to turn on mox"
     play("cheerio", hand)
     play("cheerio", hand)
     turnMainPhase(turnNum, hand)
 
-  elif "retract" in hand and battlefield.count("cheerio") > 0 and manaAvailable() >= 1:
+  elif "retract" in hand and battlefield.count("cheerio") > 0 and mana.available(battlefield, hand) >= 1:
     play("retract", hand)
     turnMainPhase(turnNum, hand)
 
-  elif "recall" in hand and battlefield.count("cheerio") > 0 and manaAvailable() >= 2:
+  elif "recall" in hand and battlefield.count("cheerio") > 0 and mana.available(battlefield, hand) >= 2:
     play("recall", hand)
     turnMainPhase(turnNum, hand)
 

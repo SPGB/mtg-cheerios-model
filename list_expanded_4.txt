@@ -1,0 +1,9 @@
+grapeshot x1
+cheerio x18
+paradise mantle x4
+engine x8
+wraith x4
+retract x4
+fetchland x8
+land x9
+mox opal x4
